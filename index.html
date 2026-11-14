@@ -205,7 +205,8 @@ async function search(){
       const sub=[p.name?street:"",p.city,p.country].filter(Boolean).join(", ");
       const b=el("button","row");b.append(el("b",null,name),el("small",null,sub));
       const place=!!p.name&&!["highway","place","boundary","waterway"].includes(p.osm_key);
-      b.onclick=()=>pick({name,lngLat:f.geometry.coordinates,sub,place,osm:{t:p.osm_type,id:p.osm_id}},true);box.append(b);
+      const area=[[p.postcode,p.city||p.town||p.village||p.locality||p.district].filter(Boolean).join(" "),p.state,p.country].filter(Boolean).join(", ");
+      b.onclick=()=>pick({name,lngLat:f.geometry.coordinates,sub,place,addr:p.name?street:"",area,osm:{t:p.osm_type,id:p.osm_id}},true);box.append(b);
     });
   }catch{toast("Suche nicht erreichbar")}
 }
@@ -214,24 +215,39 @@ function pick(d,fly){
   if(destMarker)destMarker.remove();
   destMarker=makeDest(d.lngLat);
   if(fly)map.flyTo({center:d.lngLat,zoom:15});
-  if(d.place)enrich(d);
+  if(d.place){enrich(d);locate(d)}
   renderPlace(d);
 }
 /* Karte für einen Ort: Route + (bei echten Orten) Webseite + Google Maps (Rezensionen) */
 const ext=u=>window.open(u,"_blank","noopener");
+/* Adresse + PLZ/Ort/Land: macht Namen eindeutig (z. B. Unterweisenbach DE vs. Unterweißenbach AT) */
+const where=d=>[d.addr,d.area].filter(Boolean).join(", ");
 function gmaps(d){
-  const q=[d.name,d.addr||(d.osm?d.sub:"")].filter(Boolean).join(" ");
-  return "https://www.google.com/maps/search/"+encodeURIComponent(q)+"/@"+d.lngLat[1]+","+d.lngLat[0]+",18z";
+  const w=where(d);
+  /* ohne jede Ortsangabe lieber die exakte Koordinate als einen Namen, der in einem anderen Land landen könnte */
+  const q=w?d.name+", "+w:d.lngLat[1]+","+d.lngLat[0];
+  return "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(q);
 }
+/* blockiert nie: ist die Webseite noch nicht gefunden, öffnet sich sofort die Google-Suche mit Ort */
 function openWeb(d){
   if(d.web)return ext(d.web);
-  if(d.looking)return toast("Webseite wird gesucht …");
-  ext("https://www.google.com/search?q="+encodeURIComponent([d.name,d.addr||(d.osm?d.sub:"")].filter(Boolean).join(" ")));
+  ext("https://www.google.com/search?hl=de&q="+encodeURIComponent([d.name,where(d)].filter(Boolean).join(" ")));
+}
+/* Ort (PLZ, Ort, Land) für Treffer, die direkt von der Karte kommen, per Reverse-Geocoding */
+async function locate(d){
+  if(d.area)return;
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),6000);
+  try{
+    const [lon,lat]=d.lngLat;
+    const j=await(await fetch("https://photon.komoot.io/reverse?"+new URLSearchParams({lon,lat,lang:"de",limit:1}),{signal:c.signal})).json();
+    const p=j.features&&j.features[0]&&j.features[0].properties;
+    if(p)d.area=[[p.postcode,p.city||p.town||p.village||p.locality||p.district||p.county].filter(Boolean).join(" "),p.state,p.country].filter(Boolean).join(", ");
+  }catch{}finally{clearTimeout(t)}
 }
 function renderPlace(d){
   const b=[["Route",planRoute,1]];
   if(d.place){
-    b.push([d.web?"🌐 Webseite":d.looking?"🌐 Webseite …":"🔎 Web-Suche",()=>openWeb(d)]);
+    b.push([d.web?"🌐 Webseite":"🔎 Web-Suche",()=>openWeb(d)]);
     b.push(["⭐ Google Maps",()=>ext(gmaps(d))]);
     b.push(["✕",cancel]);
   }else b.push(["Schließen",cancel]);
@@ -240,31 +256,33 @@ function renderPlace(d){
 /* Webseite/Adresse kommt aus OpenStreetMap-Tags (Overpass); die Kartenkacheln enthalten sie nicht */
 const OVP=["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter"];
 async function overpass(q){
-  for(const u of OVP){
-    const c=new AbortController(),t=setTimeout(()=>c.abort(),9000);
-    try{const r=await fetch(u+"?data="+encodeURIComponent(q),{signal:c.signal});if(r.ok)return(await r.json()).elements}
-    catch{}finally{clearTimeout(t)}
-  }
-  return null;
+  const ctrls=[];
+  const one=async u=>{
+    const c=new AbortController();ctrls.push(c);const t=setTimeout(()=>c.abort(),7000);
+    try{const r=await fetch(u+"?data="+encodeURIComponent(q),{signal:c.signal});if(!r.ok)throw new Error(r.status);return(await r.json()).elements}
+    finally{clearTimeout(t)}
+  };
+  try{const r=await Promise.any(OVP.map(one));ctrls.forEach(c=>c.abort());return r}catch{return null}
 }
 async function enrich(d){
   d.looking=true;
-  const [lon,lat]=d.lngLat,ty={N:"node",W:"way",R:"relation"}[d.osm&&d.osm.t];
-  let els=null,byId=false;
-  if(ty&&d.osm.id){els=await overpass(`[out:json][timeout:8];${ty}(${d.osm.id});out tags center 1;`);byId=!!(els&&els.length)}
-  if(!byId)els=await overpass(`[out:json][timeout:8];nwr(around:50,${lat},${lon})["name"];out tags center 30;`);
-  let t=null;
-  if(els){
-    const n=d.name.toLowerCase(),same=x=>["name","name:de","brand","official_name"].some(k=>x[k]&&x[k].toLowerCase()===n);
-    const all=els.map(e=>e.tags||{});
-    t=byId?all[0]:(all.find(x=>same(x)&&(x.website||x["contact:website"]||x.url))||all.find(same));
-  }
-  if(t){
-    let w=t.website||t["contact:website"]||t.url||t["contact:url"];
-    if(w)d.web=/^https?:\/\//i.test(w)?w:"https://"+w;
-    const a=[[t["addr:street"],t["addr:housenumber"]].filter(Boolean).join(" "),t["addr:city"]].filter(Boolean).join(", ");
-    if(a){d.addr=a;if(!d.osm)d.sub=[d.sub,a].filter(Boolean).join(" · ")}
-  }
+  try{
+    const [lon,lat]=d.lngLat,ty={N:"node",W:"way",R:"relation"}[d.osm&&d.osm.t],id=d.osm&&d.osm.id;
+    const els=await overpass(`[out:json][timeout:6];(${ty&&id?`${ty}(${id});`:""}nwr(around:50,${lat},${lon})["name"];);out tags center 80;`);
+    if(els){
+      const n=d.name.toLowerCase(),same=x=>["name","name:de","brand","official_name"].some(k=>x[k]&&x[k].toLowerCase()===n);
+      const hasW=x=>x&&(x.website||x["contact:website"]||x.url||x["contact:url"]);
+      const own=ty&&id?(els.find(e=>e.type===ty&&e.id===id)||{}).tags:null;
+      const all=els.map(e=>e.tags||{});
+      const t=hasW(own)?own:(all.find(x=>same(x)&&hasW(x))||own||all.find(same));
+      if(t){
+        const w=t.website||t["contact:website"]||t.url||t["contact:url"];
+        if(w)d.web=/^https?:\/\//i.test(w)?w:"https://"+w;
+        const a=[[t["addr:street"],t["addr:housenumber"]].filter(Boolean).join(" "),t["addr:city"]].filter(Boolean).join(", ");
+        if(a){d.addr=a;if(!d.osm)d.sub=[d.sub,a].filter(Boolean).join(" · ")}
+      }
+    }
+  }catch{}
   d.looking=false;
   if(dest===d&&!d.routed)renderPlace(d);
 }
