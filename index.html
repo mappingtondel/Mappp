@@ -47,14 +47,41 @@ body.nav #banner{display:block}body.nav #navbar{display:flex}body.nav #sheet{dis
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script>
 const $=id=>document.getElementById(id);
-const STYLES=[["Radar","gta_radar.json","#b44cf0","#1b0f26"],["Pergament","rdr_parchment.json","#c0281f","#3d1b12"]];
+/* Kartenstile direkt im Code: keine extra Dateien nötig */
+const STYLES=[["Radar","radar","#b44cf0","#1b0f26"],["Pergament","parch","#c0281f","#3d1b12"]];
+const PAL={
+ radar:{bg:"#3a3d41",land:"#43464b",park:"#4b4f52",water:"#2a2c30",building:"#4d5157",minor:"#6b7076",main:"#8f949a",major:"#c4c8cc",casing:"#2d3033",label:"#dcdfe2",halo:"#33363a"},
+ parch:{bg:"#d8c49a",land:"#dfcca3",park:"#b9b47c",water:"#8aa39e",building:"#c9b283",minor:"#b79b6a",main:"#8f7048",major:"#5f4429",casing:"#e9dab5",label:"#4a3520",halo:"#e9dab5"}};
+const zw=x=>["interpolate",["exponential",1.5],["zoom"],8,x*0.1,14,x,20,x*14];
+const cls=(...n)=>["match",["get","class"],n,true,false];
+function buildStyle(p){
+  const S="openmaptiles",L=[{id:"bg",type:"background",paint:{"background-color":p.bg}}];
+  L.push({id:"land",type:"fill",source:S,"source-layer":"landcover",filter:cls("grass","wood","farmland"),paint:{"fill-color":p.park,"fill-opacity":0.55}});
+  L.push({id:"park",type:"fill",source:S,"source-layer":"park",paint:{"fill-color":p.park}});
+  L.push({id:"water",type:"fill",source:S,"source-layer":"water",paint:{"fill-color":p.water}});
+  L.push({id:"waterway",type:"line",source:S,"source-layer":"waterway",paint:{"line-color":p.water,"line-width":zw(1.5)}});
+  L.push({id:"building",type:"fill",source:S,"source-layer":"building",minzoom:14,paint:{"fill-color":p.building}});
+  [["minor",["minor","service"],p.minor,3,13],["main",["tertiary","secondary","primary"],p.main,5,9],["major",["motorway","trunk"],p.major,7,5]].forEach(([id,names,col,wd,mz])=>{
+    const b={type:"line",source:S,"source-layer":"transportation",filter:cls(...names),minzoom:mz,layout:{"line-cap":"round","line-join":"round"}};
+    L.push({...b,id:id+"_casing",paint:{"line-color":p.casing,"line-width":zw(wd+2)}});
+    L.push({...b,id:id+"_fill",paint:{"line-color":col,"line-width":zw(wd)}});
+  });
+  const nm=["to-string",["coalesce",["get","name_de"],["get","name"]]];
+  const tp={"text-color":p.label,"text-halo-color":p.halo,"text-halo-width":1.5};
+  L.push({id:"road_labels",type:"symbol",source:S,"source-layer":"transportation_name",minzoom:14,layout:{"text-font":["Noto Sans Regular"],"text-max-width":8,"symbol-placement":"line","text-field":nm,"text-size":11},paint:tp});
+  L.push({id:"places",type:"symbol",source:S,"source-layer":"place",filter:cls("city","town","village","suburb"),layout:{"text-font":["Noto Sans Regular"],"text-max-width":8,"text-field":nm,"text-size":["match",["get","class"],"city",16,"town",14,12]},paint:tp});
+  return {version:8,sources:{[S]:{type:"vector",url:"https://tiles.openfreemap.org/planet",attribution:"© OpenStreetMap contributors, © OpenFreeMap"}},
+    glyphs:"https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",layers:L};
+}
+const styleOf=i=>buildStyle(PAL[STYLES[i][1]]);
 const VALHALLA="https://valhalla1.openstreetmap.de/route";
 let si=0,me=null,hdg=0,first=true,follow=true,nav=false,dest=null,destMarker=null;
 let shape=[],cum=[],man=[],tripTime=0,routeGeo=null,lastIdx=0,spoke={},lastReroute=0,wakeLock=null;
 
-const map=new maplibregl.Map({container:"map",style:STYLES[0][1],center:[10.4,51.1],zoom:5,maxPitch:70,attributionControl:false});
+const map=new maplibregl.Map({container:"map",style:styleOf(0),center:[10.4,51.1],zoom:5,maxPitch:70,attributionControl:false});
 map.addControl(new maplibregl.AttributionControl({compact:true}),"top-left");
 map.on("style.load",addRoute);
+let lastErr=0;map.on("error",e=>{if(Date.now()-lastErr>6000){lastErr=Date.now();toast("Kartenfehler: "+((e.error&&e.error.message)||"unbekannt"))}});
 map.on("dragstart",()=>{follow=false});
 map.on("click",e=>{if(!nav)pick({name:"Gewählter Punkt",lngLat:[e.lngLat.lng,e.lngLat.lat]},false)});
 
@@ -64,7 +91,7 @@ const meMarker=new maplibregl.Marker({element:meEl,rotationAlignment:"map",pitch
 
 function toast(t){const e=$("toast");e.textContent=t;e.style.opacity=1;setTimeout(()=>e.style.opacity=0,2200)}
 $("styleBtn").onclick=()=>{
-  si=(si+1)%STYLES.length;map.setStyle(STYLES[si][1]);toast(STYLES[si][0]);
+  si=(si+1)%STYLES.length;map.setStyle(styleOf(si),{diff:false});toast(STYLES[si][0]);
   if(destMarker){const ll=destMarker.getLngLat();destMarker.remove();destMarker=makeDest(ll)}
 };
 function makeDest(ll){return new maplibregl.Marker({color:STYLES[si][2]}).setLngLat(ll).addTo(map)}
