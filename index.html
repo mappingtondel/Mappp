@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="de"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GameMap">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>GameMap</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+:root{--bg:rgba(20,24,28,.88);--fg:#e8edf2;--acc:#f5c542}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#1b2025;color:var(--fg);font:16px -apple-system,system-ui,sans-serif;overflow:hidden}
+#map{position:absolute;inset:0}
+.panel{background:var(--bg);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-radius:20px}
+#side{position:absolute;right:12px;top:calc(env(safe-area-inset-top) + 12px);display:flex;flex-direction:column;gap:10px;z-index:2}
+.fab{width:46px;height:46px;border-radius:50%;border:0;font-size:20px;color:var(--fg)}
+#sheet{position:absolute;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom) + 10px);padding:10px 14px;z-index:2}
+#q{width:100%;border:0;background:transparent;color:var(--fg);font-size:17px;padding:8px 0;outline:none}
+.row{display:block;width:100%;text-align:left;background:none;border:0;border-top:1px solid #ffffff22;color:var(--fg);padding:9px 0}
+.row small{display:block;opacity:.6}
+#card{display:none;padding-top:6px}
+#card h3{margin:4px 0 2px}#card p{margin:0 0 10px;opacity:.65}
+.btn{border:0;border-radius:12px;padding:12px 18px;font-size:16px;margin-right:8px;background:#ffffff22;color:var(--fg)}
+.btn.p{background:var(--acc);color:#14181c;font-weight:700}
+#banner,#navbar{display:none;position:absolute;left:10px;right:10px;z-index:2;padding:12px 16px}
+#banner{top:calc(env(safe-area-inset-top) + 8px);right:70px}
+#banner .big{font-size:28px;font-weight:700;color:var(--acc)}
+#navbar{bottom:calc(env(safe-area-inset-bottom) + 10px);display:none;align-items:center;justify-content:space-between}
+body.nav #banner{display:block}body.nav #navbar{display:flex}body.nav #sheet{display:none}
+#toast{position:absolute;left:50%;top:calc(env(safe-area-inset-top) + 70px);transform:translateX(-50%);background:var(--bg);padding:8px 14px;border-radius:14px;z-index:3;opacity:0;transition:opacity .3s;pointer-events:none}
+.me{width:30px;height:30px}
+.me svg{width:30px;height:30px;filter:drop-shadow(0 0 4px #000)}
+</style></head><body>
+<div id="map"></div>
+<div id="side"><button class="fab panel" id="styleBtn">🎨</button><button class="fab panel" id="locBtn">⌖</button></div>
+<div id="banner" class="panel"><div class="big" id="bDist"></div><div id="bText"></div></div>
+<div id="navbar" class="panel"><div><b id="eta"></b><div id="rem" style="opacity:.65"></div></div><button class="btn p" id="stopBtn">Beenden</button></div>
+<div id="sheet" class="panel">
+  <div id="card"><h3 id="cTitle"></h3><p id="cSub"></p><div id="cBtns"></div></div>
+  <div id="results"></div>
+  <input id="q" placeholder="🔍  Suche nach Orten" autocomplete="off">
+</div>
+<div id="toast"></div>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const STYLES=[["Radar","gta_radar.json","#b44cf0","#1b0f26"],["Pergament","rdr_parchment.json","#c0281f","#3d1b12"]];
+const VALHALLA="https://valhalla1.openstreetmap.de/route";
+let si=0,me=null,hdg=0,first=true,follow=true,nav=false,dest=null,destMarker=null;
+let shape=[],cum=[],man=[],tripTime=0,routeGeo=null,lastIdx=0,spoke={},lastReroute=0,wakeLock=null;
+
+const map=new maplibregl.Map({container:"map",style:STYLES[0][1],center:[10.4,51.1],zoom:5,maxPitch:70,attributionControl:false});
+map.addControl(new maplibregl.AttributionControl({compact:true}),"top-left");
+map.on("style.load",addRoute);
+map.on("dragstart",()=>{follow=false});
+map.on("click",e=>{if(!nav)pick({name:"Gewählter Punkt",lngLat:[e.lngLat.lng,e.lngLat.lat]},false)});
+
+const meEl=document.createElement("div");meEl.className="me";
+meEl.innerHTML='<svg viewBox="0 0 100 100"><polygon points="50,8 82,90 50,70 18,90" fill="#f5c542" stroke="#14181c" stroke-width="6"/></svg>';
+const meMarker=new maplibregl.Marker({element:meEl,rotationAlignment:"map",pitchAlignment:"map"});
+
+function toast(t){const e=$("toast");e.textContent=t;e.style.opacity=1;setTimeout(()=>e.style.opacity=0,2200)}
+$("styleBtn").onclick=()=>{
+  si=(si+1)%STYLES.length;map.setStyle(STYLES[si][1]);toast(STYLES[si][0]);
+  if(destMarker){const ll=destMarker.getLngLat();destMarker.remove();destMarker=makeDest(ll)}
+};
+function makeDest(ll){return new maplibregl.Marker({color:STYLES[si][2]}).setLngLat(ll).addTo(map)}
+$("locBtn").onclick=()=>{follow=true;if(me){map.easeTo({center:me,zoom:Math.max(map.getZoom(),15)})}};
+$("stopBtn").onclick=stopNav;
+
+/* ---------- Standort ---------- */
+navigator.geolocation.watchPosition(onPos,e=>toast("Standort: "+e.message),{enableHighAccuracy:true,maximumAge:1000});
+function onPos(p){
+  const c=p.coords;me=[c.longitude,c.latitude];
+  if(c.heading!=null&&!isNaN(c.heading)&&c.speed>1)hdg=c.heading;
+  meMarker.setLngLat(me).setRotation(hdg).addTo(map);
+  if(first){first=false;map.jumpTo({center:me,zoom:15})}
+  if(follow)camera();
+  if(nav)navStep();
+}
+function camera(){
+  if(!me)return;
+  map.easeTo({center:me,bearing:nav?hdg:map.getBearing(),zoom:nav?16.5:map.getZoom(),
+    pitch:nav?60:map.getPitch(),padding:{top:nav?260:0,bottom:0,left:0,right:0},duration:900});
+}
+
+/* ---------- Suche (Photon) ---------- */
+let timer;$("q").oninput=()=>{clearTimeout(timer);timer=setTimeout(search,400)};
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
+async function search(){
+  const s=$("q").value.trim(),box=$("results");box.innerHTML="";
+  if(s.length<3)return;
+  const u=new URL("https://photon.komoot.io/api/");
+  u.search=new URLSearchParams({q:s,limit:6,lang:"de",...(me?{lat:me[1],lon:me[0]}:{})});
+  try{
+    const j=await(await fetch(u)).json();
+    j.features.forEach(f=>{
+      const p=f.properties,street=[p.street,p.housenumber].filter(Boolean).join(" ");
+      const name=p.name||street;if(!name)return;
+      const sub=[p.name?street:"",p.city,p.country].filter(Boolean).join(", ");
+      const b=el("button","row");b.append(el("b",null,name),el("small",null,sub));
+      b.onclick=()=>pick({name,lngLat:f.geometry.coordinates,sub},true);box.append(b);
+    });
+  }catch{toast("Suche nicht erreichbar")}
+}
+function pick(d,fly){
+  dest=d;$("results").innerHTML="";$("q").value="";$("q").blur();follow=false;
+  if(destMarker)destMarker.remove();
+  destMarker=makeDest(d.lngLat);
+  if(fly)map.flyTo({center:d.lngLat,zoom:15});
+  showCard(d.name,d.sub||"",[["Route",planRoute,1],["Schließen",cancel]]);
+}
+function showCard(t,s,btns){
+  $("cTitle").textContent=t;$("cSub").textContent=s;const b=$("cBtns");b.innerHTML="";
+  btns.forEach(([l,fn,p])=>{const x=el("button","btn"+(p?" p":""),l);x.onclick=fn;b.append(x)});
+  $("card").style.display="block";
+}
+function cancel(){
+  $("card").style.display="none";dest=null;routeGeo=null;
+  if(destMarker){destMarker.remove();destMarker=null}
+  map.getSource("route")?.setData({type:"FeatureCollection",features:[]});
+}
+
+/* ---------- Routing (Valhalla) ---------- */
+function decode(str){let i=0,lat=0,lon=0,out=[];
+  while(i<str.length){let b,s=0,r=0;
+    do{b=str.charCodeAt(i++)-63;r|=(b&31)<<s;s+=5}while(b>=32);lat+=(r&1)?~(r>>1):(r>>1);
+    s=0;r=0;do{b=str.charCodeAt(i++)-63;r|=(b&31)<<s;s+=5}while(b>=32);lon+=(r&1)?~(r>>1):(r>>1);
+    out.push([lon/1e6,lat/1e6])}
+  return out}
+const rad=Math.PI/180;
+function dist(a,b){const dLa=(b[1]-a[1])*rad,dLo=(b[0]-a[0])*rad;
+  const h=Math.sin(dLa/2)**2+Math.cos(a[1]*rad)*Math.cos(b[1]*rad)*Math.sin(dLo/2)**2;
+  return 12742000*Math.asin(Math.sqrt(h))}
+async function fetchRoute(){
+  const body={locations:[{lat:me[1],lon:me[0]},{lat:dest.lngLat[1],lon:dest.lngLat[0]}],costing:"auto",
+    directions_options:{language:"de-DE",units:"kilometers"}};
+  const j=await(await fetch(VALHALLA+"?json="+encodeURIComponent(JSON.stringify(body)))).json();
+  const leg=j.trip.legs[0];
+  shape=decode(leg.shape);man=leg.maneuvers;tripTime=j.trip.summary.time;
+  cum=[0];for(let i=1;i<shape.length;i++)cum[i]=cum[i-1]+dist(shape[i-1],shape[i]);
+  routeGeo={type:"Feature",geometry:{type:"LineString",coordinates:shape}};
+  map.getSource("route")?.setData(routeGeo);
+  lastIdx=0;spoke={};
+  return j.trip.summary;
+}
+async function planRoute(){
+  if(!me){toast("Warte auf GPS …");return}
+  try{
+    const s=await fetchRoute();
+    const b=shape.reduce((bb,c)=>bb.extend(c),new maplibregl.LngLatBounds(shape[0],shape[0]));
+    map.fitBounds(b,{padding:{top:80,bottom:260,left:40,right:40}});
+    showCard(`${s.length.toFixed(1)} km · ${Math.round(s.time/60)} min`,dest.name,[["Los",startNav,1],["Abbrechen",cancel]]);
+  }catch{toast("Routing nicht erreichbar")}
+}
+function addRoute(){
+  if(map.getSource("route"))return;
+  map.addSource("route",{type:"geojson",data:routeGeo||{type:"FeatureCollection",features:[]}});
+  const lay={"line-cap":"round","line-join":"round"};
+  map.addLayer({id:"route-casing",type:"line",source:"route",layout:lay,paint:{"line-color":STYLES[si][3],"line-width":12}});
+  map.addLayer({id:"route-line",type:"line",source:"route",layout:lay,paint:{"line-color":STYLES[si][2],"line-width":7}});
+}
+
+/* ---------- Navigation ---------- */
+const ICON={9:"↗",10:"➡",11:"↘",12:"↩",13:"↩",14:"↙",15:"⬅",16:"↖",4:"🏁",5:"🏁",6:"🏁",26:"⟳",27:"⟳"};
+const fmt=d=>d<1000?Math.max(10,Math.round(d/10)*10)+" m":(d/1000).toFixed(1)+" km";
+function speak(t){if(!t||!window.speechSynthesis)return;const u=new SpeechSynthesisUtterance(t);u.lang="de-DE";speechSynthesis.cancel();speechSynthesis.speak(u)}
+async function wake(){try{wakeLock=await navigator.wakeLock.request("screen")}catch{}}
+document.addEventListener("visibilitychange",()=>{if(nav&&document.visibilityState==="visible")wake()});
+function startNav(){
+  nav=true;follow=true;document.body.classList.add("nav");$("card").style.display="none";
+  speak("Navigation gestartet");wake();camera();
+}
+function stopNav(){
+  nav=false;document.body.classList.remove("nav");wakeLock?.release();speechSynthesis.cancel();cancel();
+  map.easeTo({pitch:0,bearing:0,padding:{top:0,bottom:0,left:0,right:0}});
+}
+async function navStep(){
+  let bi=lastIdx,bd=1e12;
+  for(let i=Math.max(0,lastIdx-5);i<shape.length;i++){const d=dist(me,shape[i]);if(d<bd){bd=d;bi=i}}
+  if(bd>70){
+    if(Date.now()-lastReroute>10000){lastReroute=Date.now();speak("Route wird neu berechnet");try{await fetchRoute()}catch{}}
+    return;
+  }
+  lastIdx=bi;
+  const rem=cum[cum.length-1]-cum[bi];
+  if(rem<25){speak("Sie haben Ihr Ziel erreicht");stopNav();return}
+  const k=man.findIndex((m,i)=>i>0&&m.begin_shape_index>bi);
+  if(k<0)return;
+  const m=man[k],d=cum[m.begin_shape_index]-cum[bi];
+  $("bDist").textContent=(ICON[m.type]||"⬆")+" "+fmt(d);
+  $("bText").textContent=m.instruction;
+  $("rem").textContent=fmt(rem);
+  $("eta").textContent=new Date(Date.now()+tripTime*1000*(rem/cum[cum.length-1])).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"})+" Uhr";
+  const st=spoke[k]||0;
+  if(d<=80&&st<2){spoke[k]=2;speak(m.instruction)}
+  else if(d<=450&&st<1){spoke[k]=1;speak("In "+Math.round(d/50)*50+" Metern: "+m.instruction)}
+}
+</script></body></html>
