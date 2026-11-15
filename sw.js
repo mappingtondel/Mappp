@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gamemap-v1';
+const CACHE_NAME = 'gamemap-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -28,7 +28,6 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  // API-Aufrufe (Routing, Geocoding, Overpass) nicht hart cachen
   if (url.hostname.includes('valhalla') || url.hostname.includes('photon') || url.hostname.includes('overpass')) {
     return;
   }
