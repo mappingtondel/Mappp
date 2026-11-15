@@ -2,14 +2,12 @@ import { STYLES, PAL, POI, ROUTE, ME, styleOf, drawIcon } from './styles.js';
 import { dist, calculateRoute, searchPhoton, reversePhoton, queryOverpass } from './routing.js';
 import { $, IC, turnSvg, toast, el, getFavorites, isFavorite, toggleFavorite, getHistory, addHistory, initNetworkMonitor } from './ui.js';
 
-// Service Worker registrieren
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
 
 initNetworkMonitor();
 
-// UI Icons initialisieren
 $("styleBtn").innerHTML = IC.layers;
 $("locBtn").innerHTML = IC.loc;
 $("compassBtn").innerHTML = IC.compass;
@@ -20,6 +18,7 @@ let rawMe = null, smoothMe = null;
 let hdg = 0, first = true, follow = true, nav = false;
 let dest = null, destMarker = null;
 let waypoints = [], wpMarkers = [];
+let searchMode = "dest"; // "dest" oder "waypoint"
 let shape = [], cum = [], man = [], tripTime = 0, routeGeo = null, lastIdx = 0, spoke = {}, lastReroute = 0, wakeLock = null;
 let speed = 0, compassOn = false, lastCam = 0;
 
@@ -33,7 +32,14 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.AttributionControl({ compact: true }), "top-left");
 
-map.on("style.load", addRoute);
+// Routen-Layer zuverlässig bei jedem Laden / Stilwechsel aufbauen
+map.on("style.load", () => {
+  addRoute();
+  if (routeGeo && map.getSource("route")) {
+    map.getSource("route").setData(routeGeo);
+  }
+});
+
 map.on("styleimagemissing", e => {
   const [, g, k] = e.id.split("-");
   if (POI[g] && PAL[k]) {
@@ -55,7 +61,25 @@ map.on("dragstart", () => { follow = false; updateCompassBtn(); });
 map.on("rotate", updateCompassBtn);
 map.on("pitch", updateCompassBtn);
 
-// Kompass-Reset-Button steuern
+// Fix für mobile Tastatur: verhindert Hängenbleiben des Viewports nach Schließen der Tastatur
+window.addEventListener("scroll", () => {
+  if (window.scrollY !== 0 || window.scrollX !== 0) {
+    window.scrollTo(0, 0);
+  }
+});
+$("q").addEventListener("blur", () => {
+  setTimeout(() => {
+    window.scrollTo(0, 0);
+    map.resize();
+  }, 150);
+});
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", () => {
+    window.scrollTo(0, 0);
+    map.resize();
+  });
+}
+
 function updateCompassBtn() {
   const btn = $("compassBtn");
   const rotated = Math.abs(map.getBearing()) > 2 || map.getPitch() > 2;
@@ -88,6 +112,11 @@ const kindOf = p => KIND[p.subclass] || KIND[p.class] || String(p.subclass || p.
 
 map.on("click", e => {
   if (nav) return;
+  if (searchMode === "waypoint") {
+    addWaypoint({ name: "Gewählter Stopp", lngLat: [e.lngLat.lng, e.lngLat.lat] });
+    exitWaypointSearch();
+    return;
+  }
   const r = 12, box = [[e.point.x - r, e.point.y - r], [e.point.x + r, e.point.y + r]];
   const ids = Object.keys(POI).map(g => "poi_" + g).filter(id => map.getLayer(id));
   const f = ids.length ? map.queryRenderedFeatures(box, { layers: ids }).find(f => f.properties.name_de || f.properties.name) : null;
@@ -99,7 +128,6 @@ map.on("click", e => {
   pick({ name: "Gewählter Punkt", lngLat: [e.lngLat.lng, e.lngLat.lat] }, false);
 });
 
-// Standort-Marker & GPS-Glättung
 const meEl = document.createElement("div");
 meEl.className = "me";
 const setMe = () => { meEl.innerHTML = ME[STYLES[si][1]]; };
@@ -222,7 +250,6 @@ function onPos(p) {
   if (!smoothMe) smoothMe = [...rawMe];
 
   speed = c.speed > 0 ? c.speed : 0;
-  // Live-Tachometer aktualisieren (m/s -> km/h)
   const kmh = Math.round(speed * 3.6);
   const spdEl = $("speedVal");
   if (spdEl) spdEl.textContent = kmh;
@@ -261,22 +288,52 @@ function renderChips() {
     const b = el("button", "chip fav");
     b.innerHTML = IC.starFill;
     b.append(document.createTextNode(f.name));
-    b.onclick = () => pick(f, true);
+    b.onclick = () => handlePlaceSelection(f, true);
     box.append(b);
   });
 
   hist.slice(0, 5).forEach(h => {
     const b = el("button", "chip");
     b.textContent = h.name;
-    b.onclick = () => pick(h, true);
+    b.onclick = () => handlePlaceSelection(h, true);
     box.append(b);
   });
 }
 renderChips();
 
-/* ---------- Suche (Photon) ---------- */
+/* ---------- Suche (Photon) für Ziel & Zwischenstopps ---------- */
 let timer;
-$("q").oninput = () => { clearTimeout(timer); timer = setTimeout(search, 400); };
+$("q").oninput = () => { clearTimeout(timer); timer = setTimeout(search, 350); };
+$("qCancel").onclick = exitWaypointSearch;
+
+function startWaypointSearch() {
+  searchMode = "waypoint";
+  $("sheet").classList.add("wp-mode");
+  $("card").style.display = "none";
+  $("results").innerHTML = "";
+  $("q").value = "";
+  $("q").placeholder = "Zwischenstopp suchen …";
+  $("q").focus();
+}
+
+function exitWaypointSearch() {
+  searchMode = "dest";
+  $("sheet").classList.remove("wp-mode");
+  $("results").innerHTML = "";
+  $("q").value = "";
+  $("q").placeholder = "Suche nach Orten";
+  $("q").blur();
+  if (dest) $("card").style.display = "block";
+}
+
+function handlePlaceSelection(placeObj, fly) {
+  if (searchMode === "waypoint") {
+    addWaypoint(placeObj);
+    exitWaypointSearch();
+  } else {
+    pick(placeObj, fly);
+  }
+}
 
 async function search() {
   const s = $("q").value.trim(), box = $("results");
@@ -295,7 +352,8 @@ async function search() {
       b.append(left);
       const place = !!p.name && !["highway", "place", "boundary", "waterway"].includes(p.osm_key);
       const area = [[p.postcode, p.city || p.town || p.village || p.locality || p.district].filter(Boolean).join(" "), p.state, p.country].filter(Boolean).join(", ");
-      b.onclick = () => pick({ name, lngLat: f.geometry.coordinates, sub, place, addr: p.name ? street : "", area, osm: { t: p.osm_type, id: p.osm_id } }, true);
+      const item = { name, lngLat: f.geometry.coordinates, sub, place, addr: p.name ? street : "", area, osm: { t: p.osm_type, id: p.osm_id } };
+      b.onclick = () => handlePlaceSelection(item, true);
       box.append(b);
     });
   } catch {
@@ -324,7 +382,6 @@ function pick(d, fly) {
   renderPlace(d);
 }
 
-// Zwischenstopp hinzufügen / verwalten
 function addWaypoint(wp) {
   waypoints.push(wp);
   const m = new maplibregl.Marker({ color: "#ffffff", scale: 0.75 }).setLngLat(wp.lngLat).addTo(map);
@@ -453,6 +510,9 @@ function showCard(t, s, btns, placeObj) {
 function cancel() {
   $("card").style.display = "none";
   $("waypoints").innerHTML = "";
+  searchMode = "dest";
+  $("sheet").classList.remove("wp-mode");
+  $("q").placeholder = "Suche nach Orten";
   dest = null;
   waypoints = [];
   clearWaypointMarkers();
@@ -472,6 +532,7 @@ async function fetchRoute() {
   cum = res.cum;
   tripTime = res.tripTime;
   routeGeo = { type: "Feature", geometry: { type: "LineString", coordinates: shape } };
+  if (!map.getSource("route")) addRoute();
   map.getSource("route")?.setData(routeGeo);
   lastIdx = 0;
   spoke = {};
@@ -498,31 +559,13 @@ async function planRoute() {
       dest.name,
       [
         ["Los", startNav, 1],
-        ["@plus Stopp", promptWaypoint],
+        ["@plus Stopp", startWaypointSearch],
         ["Abbrechen", cancel]
       ],
       dest
     );
   } catch {
     toast("Routing nicht erreichbar");
-  }
-}
-
-async function promptWaypoint() {
-  const qStr = prompt("Zwischenstopp suchen (Ort oder Adresse):");
-  if (!qStr || qStr.trim().length < 2) return;
-  try {
-    const features = await searchPhoton(qStr.trim(), rawMe);
-    if (!features.length) {
-      toast("Kein Ort gefunden");
-      return;
-    }
-    const f = features[0];
-    const p = f.properties;
-    const name = p.name || [p.street, p.housenumber].filter(Boolean).join(" ") || qStr;
-    addWaypoint({ name, lngLat: f.geometry.coordinates });
-  } catch {
-    toast("Suche fehlgeschlagen");
   }
 }
 
@@ -558,6 +601,7 @@ function startNav() {
   speak("Navigation gestartet");
   wake();
   camera();
+  if (shape.length > 0) navStep();
 }
 
 function stopNav() {
