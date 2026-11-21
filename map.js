@@ -33,6 +33,7 @@ let sim = null, simTimer = null, simKmh = 50;
 let limitKmh = null, limitT = 0, limitBusy = false, limitMiss = 0, spokePost = {}, dlBusy = false;
 const setBusy = on => { busyN = Math.max(0, busyN + (on ? 1 : -1)); document.body.classList.toggle("busy", busyN > 0); };
 const beep = name => { if (voice) sfx(name); };
+let onRoute = false;
 let speed = 0, acc = 0, compassOn = false, lastCam = 0, progress = 0, routeSeq = 0, searchSeq = 0, lastGeoErr = 0, meAdded = false;
 
 const map = new maplibregl.Map({
@@ -95,6 +96,17 @@ if (window.visualViewport) {
     map.resize();
   });
 }
+["orientationchange", "pageshow", "resize"].forEach(ev => window.addEventListener(ev, () => setTimeout(() => map.resize(), 200)));
+
+// Hintergrund und Browserleiste in der Farbe der Karte halten, damit unten kein grauer Streifen sichtbar ist
+function applyChrome() {
+  const bg = PAL[STYLES[si][1]].bg;
+  document.documentElement.style.background = bg;
+  document.body.style.background = bg;
+  const m = document.querySelector('meta[name="theme-color"]');
+  if (m) m.setAttribute("content", bg);
+}
+applyChrome();
 
 function updateCompassBtn() {
   const btn = $("compassBtn");
@@ -173,6 +185,7 @@ requestAnimationFrame(animateMarker);
 $("styleBtn").onclick = () => {
   si = (si + 1) % STYLES.length;
   map.setStyle(styleOf(si), { diff: false });
+  applyChrome();
   setMe();
   toast(STYLES[si][0]);
   beep("tick");
@@ -658,6 +671,7 @@ function setRoute(i) {
   lastIdx = 0;
   spoke = {};
   spokePost = {};
+  onRoute = false;
   if (sim) { sim.s = 0; sim.i = 0; }
 }
 
@@ -863,6 +877,9 @@ function startNav() {
   speak("Navigation gestartet");
   wake();
   camera(true);
+  // Anzeige sofort mit der ersten Anweisung füllen, damit sie nie leer ist
+  const k0 = man.findIndex((m, i) => i > 0);
+  if (k0 >= 0) showManeuver(k0, cum[man[k0].begin_shape_index]);
   if (shape.length > 0) navStep();
 }
 
@@ -878,6 +895,23 @@ function stopNav(arrived) {
   cancel();
   map.easeTo({ pitch: 0, bearing: 0, padding: { top: 0, bottom: 0, left: 0, right: 0 } });
   updateCompassBtn();
+}
+
+// Abbiegeanzeige oben links (Pfeil, Entfernung, Text, nächste Anweisung)
+function showManeuver(k, d) {
+  const m = man[k];
+  if (!m) return;
+  const ico = $("bIco");
+  if (ico.dataset.t != m.type) { ico.dataset.t = m.type; ico.innerHTML = turnSvg(m.type); }
+  $("bDist").textContent = fmt(d);
+  $("bText").textContent = m.instruction;
+  const n = man[k + 1];
+  $("b2").hidden = !n;
+  if (n) {
+    const i2 = $("b2Ico");
+    if (i2.dataset.t != n.type) { i2.dataset.t = n.type; i2.innerHTML = turnSvg(n.type); }
+    $("b2Text").textContent = n.instruction;
+  }
 }
 
 // Zwischenstopps, die man erreicht hat, nicht mehr für die Neuberechnung verwenden
@@ -908,7 +942,20 @@ async function navStep() {
   renderLimit();
   updateLimit();
   const { bi, bd, bt } = matchRoute();
-  if (bi < 0 || bd > Math.max(60, Math.min(acc * 1.5, 200))) {
+  const off = bi < 0 || bd > Math.max(60, Math.min(acc * 1.5, 200));
+  if (off && !onRoute && bi >= 0 && bd < 300) {
+    // Noch nicht auf der Route (z. B. Start abseits der Straße): erste Anweisung zeigen, noch nicht neu berechnen
+    const k0 = man.findIndex((m, i) => i > 0);
+    if (k0 >= 0) showManeuver(k0, bd + cum[man[k0].begin_shape_index]);
+    return;
+  }
+  if (!off) onRoute = true;
+  if (off) {
+    const ico = $("bIco");
+    if (ico.dataset.t !== "reroute") { ico.dataset.t = "reroute"; ico.innerHTML = turnSvg(12); }
+    $("bDist").textContent = "Neue Route";
+    $("bText").textContent = "Route wird neu berechnet …";
+    $("b2").hidden = true;
     if (!navigator.onLine) {
       if (Date.now() - lastReroute > 15000) {
         lastReroute = Date.now();
@@ -936,17 +983,7 @@ async function navStep() {
   const k = man.findIndex((m, i) => i > 0 && m.begin_shape_index > bi);
   if (k < 0) return;
   const m = man[k], d = Math.max(0, cum[m.begin_shape_index] - progress);
-  const ico = $("bIco");
-  if (ico.dataset.t != m.type) { ico.dataset.t = m.type; ico.innerHTML = turnSvg(m.type); }
-  $("bDist").textContent = fmt(d);
-  $("bText").textContent = m.instruction;
-  const n = man[k + 1];
-  $("b2").hidden = !n;
-  if (n) {
-    const i2 = $("b2Ico");
-    if (i2.dataset.t != n.type) { i2.dataset.t = n.type; i2.innerHTML = turnSvg(n.type); }
-    $("b2Text").textContent = n.instruction;
-  }
+  showManeuver(k, d);
   const mins = Math.max(1, Math.round(tripTime * (total > 0 ? rem / total : 0) / 60));
   $("eta").textContent = new Date(Date.now() + mins * 60000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
   $("remT").textContent = mins >= 60 ? Math.floor(mins / 60) + ":" + String(mins % 60).padStart(2, "0") : mins;

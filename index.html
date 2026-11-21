@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <html lang="de"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="viewport" id="vp" content="width=device-width,initial-scale=1,user-scalable=no">
+<script>
+// Im Browser (Safari) ohne viewport-fit=cover: sonst liegt die graue Safari-Leiste über der Oberfläche.
+// Als installierte App (Home-Bildschirm) füllt die Karte den ganzen Bildschirm.
+if (navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)) {
+  document.getElementById('vp').setAttribute('content', 'width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no');
+}
+</script>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="GameMap">
