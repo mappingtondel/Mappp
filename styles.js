@@ -1,8 +1,10 @@
-export const STYLES=[["Radar","radar","#a34cf1","#1b0f26"],["Pergament","parch","#c0281f","#3d1b12"]];
+export const STYLES=[["Radar","radar","#a34cf1","#1b0f26"],["Pergament","parch","#c0281f","#3d1b12"],["Neon","vice","#ff3da8","#140a2e"],["Pixel","pixel","#e0452b","#3d6b2a"]];
 
 export const PAL={
  radar:{bg:"#181818",park:"#202020",water:"#2b2e2f",wline:"#2b2e2f",bld:"#26292e",bldo:"#121417",minor:"#505050",main:"#8b8b8b",major:"#9fa1a2",casing:"#181818",rw:1.25,label:"#d6d6d6",halo:"#181818",upper:0},
- parch:{bg:"#c9b490",park:"#bfae8b",water:"#98917f",wline:"#827964",bld:"#7a6d59",bldo:"#454037",minor:"#5c554a",main:"#4f493f",major:"#454037",casing:"#cdb995",rw:1,label:"#4a443d",halo:"#ccb691",upper:1}
+ parch:{bg:"#c9b490",park:"#bfae8b",water:"#98917f",wline:"#827964",bld:"#7a6d59",bldo:"#454037",minor:"#5c554a",main:"#4f493f",major:"#454037",casing:"#cdb995",rw:1,label:"#4a443d",halo:"#ccb691",upper:1},
+ vice:{bg:"#140a2e",park:"#1b1040",water:"#0a1d4a",wline:"#1f4fb0",bld:"#2a1459",bldo:"#ff3da8",minor:"#7a3fd1",main:"#c74bd8",major:"#ff3da8",casing:"#140a2e",rw:1.15,label:"#7ff3ff",halo:"#140a2e",upper:0},
+ pixel:{bg:"#7fb85a",park:"#5e9a3f",water:"#3b7bd9",wline:"#2c5fb0",bld:"#a0724a",bldo:"#5a3d22",minor:"#e8d9a0",main:"#d9c27a",major:"#c9a24d",casing:"#6b5a30",rw:1.1,label:"#ffffff",halo:"#2b2b2b",upper:0,px:1}
 };
 
 export const POI={
@@ -26,12 +28,16 @@ export const POI={
 
 export const ROUTE={
  radar:{col:"#a34cf1",op:.72,w:7,cc:"#0d0614",co:.5,cw:10.5},
- parch:{col:"#b3261e",op:1,w:4.5,cc:"#2a1a12",co:.85,cw:7.5}
+ parch:{col:"#b3261e",op:1,w:4.5,cc:"#2a1a12",co:.85,cw:7.5},
+ vice:{col:"#33f0ff",op:.95,w:5.5,cc:"#ff3da8",co:.45,cw:12},
+ pixel:{col:"#ffd23f",op:1,w:5,cc:"#3a2a14",co:.9,cw:8.5}
 };
 
 export const ME={
  radar:'<svg viewBox="0 0 100 100"><polygon points="50,6 87,93 50,73 13,93" fill="#fff" stroke="#14181c" stroke-width="8" stroke-linejoin="round"/></svg>',
- parch:'<svg viewBox="0 0 100 100"><path d="M50 5C56 27 80 40 80 64a30 30 0 0 1-60 0C20 40 44 27 50 5z" fill="#eadcb8" stroke="#2a2824" stroke-width="8" stroke-linejoin="round"/><circle cx="50" cy="64" r="11" fill="#b9ad8f" stroke="#2a2824" stroke-width="7"/></svg>'
+ parch:'<svg viewBox="0 0 100 100"><path d="M50 5C56 27 80 40 80 64a30 30 0 0 1-60 0C20 40 44 27 50 5z" fill="#eadcb8" stroke="#2a2824" stroke-width="8" stroke-linejoin="round"/><circle cx="50" cy="64" r="11" fill="#b9ad8f" stroke="#2a2824" stroke-width="7"/></svg>',
+ vice:'<svg viewBox="0 0 100 100"><polygon points="50,6 87,93 50,73 13,93" fill="#33f0ff" stroke="#ff3da8" stroke-width="8" stroke-linejoin="round"/></svg>',
+ pixel:'<svg viewBox="0 0 100 100" shape-rendering="crispEdges"><path d="M44 6h12v12h12v12h12v12h12v12H68v36H56V66H44v24H32V54H8V42h12V30h12V18h12z" fill="#fff" stroke="#222" stroke-width="6" stroke-linejoin="miter"/></svg>'
 };
 
 const zw=x=>["interpolate",["exponential",1.5],["zoom"],8,x*0.1,14,x,20,x*14];
@@ -40,35 +46,22 @@ const inKeys=keys=>["any",["match",["to-string",["get","class"]],keys,true,false
 
 export function buildStyle(k){
   const p=PAL[k],S="openmaptiles",F=["Noto Sans Regular"],L=[{id:"bg",type:"background",paint:{"background-color":p.bg}}];
-  L.push({id:"land",type:"fill",source:S,"source-layer":"landcover",filter:cls("grass","wood","farmland"),paint:{"fill-color":p.park,"fill-opacity":0.7}});
+  L.push({id:"land",type:"fill",source:S,"source-layer":"landcover",filter:cls("grass","wood","farmland"),paint:{"fill-color":p.park,"fill-opacity":0.7,"fill-antialias":!p.px}});
   L.push({id:"park",type:"fill",source:S,"source-layer":"park",paint:{"fill-color":p.park}});
-  L.push({id:"water",type:"fill",source:S,"source-layer":"water",paint:{"fill-color":p.water,"fill-outline-color":p.wline}});
+  L.push({id:"water",type:"fill",source:S,"source-layer":"water",paint:{"fill-color":p.water,"fill-outline-color":p.wline,"fill-antialias":!p.px}});
   L.push({id:"waterway",type:"line",source:S,"source-layer":"waterway",paint:{"line-color":p.wline,"line-width":zw(1.5)}});
 
-  // Straßen unterhalb der 3D-Gebäude
+  // Straßen unterhalb der Gebäude
   [["minor",["minor","service"],p.minor,3,13],["main",["tertiary","secondary","primary"],p.main,5,9],["major",["motorway","trunk"],p.major,7,5]].forEach(([id,names,col,wd,mz])=>{
     wd*=p.rw;
-    const b={type:"line",source:S,"source-layer":"transportation",filter:cls(...names),minzoom:mz,layout:{"line-cap":"round","line-join":"round"}};
+    const b={type:"line",source:S,"source-layer":"transportation",filter:cls(...names),minzoom:mz,layout:{"line-cap":p.px?"butt":"round","line-join":p.px?"miter":"round"}};
     L.push({...b,id:id+"_casing",paint:{"line-color":p.casing,"line-width":zw(wd+2)}});
     L.push({...b,id:id+"_fill",paint:{"line-color":col,"line-width":zw(wd)}});
   });
 
-  // 3D-Gebäude (Extrusions)
-  if(p.bld){
-    L.push({
-      id:"building-3d",
-      type:"fill-extrusion",
-      source:S,
-      "source-layer":"building",
-      minzoom:14,
-      paint:{
-        "fill-extrusion-color":p.bld,
-        "fill-extrusion-height":["coalesce",["get","render_height"],["get","height"],8],
-        "fill-extrusion-base":["coalesce",["get","render_min_height"],["get","min_height"],0],
-        "fill-extrusion-opacity":k==="radar"?0.82:0.75
-      }
-    });
-  }
+  // Gebäude flach (Grundrisse) – wie in den Spielkarten
+  L.push({id:"building",type:"fill",source:S,"source-layer":"building",minzoom:14,
+    paint:{"fill-color":p.bld,"fill-outline-color":p.bldo,"fill-antialias":!p.px}});
 
   const nm=["to-string",["coalesce",["get","name_de"],["get","name"]]];
   const tp={"text-color":p.label,"text-halo-color":p.halo,"text-halo-width":1.5};
@@ -107,20 +100,29 @@ const G={
 
 const GR={health:["M11 10V8.5A2.5 2.5 0 0 1 13.5 6h5A2.5 2.5 0 0 1 21 8.5V10h4.5a2.5 2.5 0 0 1 2.5 2.5v11a2.5 2.5 0 0 1-2.5 2.5h-19A2.5 2.5 0 0 1 4 23.5v-11A2.5 2.5 0 0 1 6.5 10z","M14.6 13.4h2.8v3.2h3.2v2.8h-3.2v3.2h-2.8v-3.2h-3.2v-2.8h3.2z M13.4 10V8.9h5.2V10z"]};
 
+const BADGE={
+  parch:{bg:"#2f2d29",fg:"#eadcb8",ring:"#eadcb8",shape:"circle",gr:1},
+  vice:{bg:"#1a0b3b",fg:"#33f0ff",ring:"#ff3da8",glow:"#ff3da8",shape:"circle"},
+  pixel:{bg:"#3b3b3b",fg:"#ffffff",ring:"#9a9a9a",shape:"square"}
+};
+
 export function drawIcon(g,k,mk){
   const c=mk?mk():document.createElement("canvas");c.width=c.height=64;
   const x=c.getContext("2d");x.scale(2,2);x.lineJoin=x.lineCap="round";
-  const rdr=k==="parch",gl=(rdr&&GR[g])||G[g],txt=typeof gl==="string";
+  const B=BADGE[k],gl=(B&&B.gr&&GR[g])||G[g],txt=typeof gl==="string";
   const T=()=>{x.font="bold 25px -apple-system,Helvetica,Arial,sans-serif";x.textAlign="center";x.textBaseline="middle"};
-  if(!rdr){
+  if(!B){
     if(txt){T();x.lineWidth=4.5;x.strokeStyle=INK;x.strokeText(gl,16,17);x.fillStyle="#fff";x.fillText(gl,16,17)}
     else{const s=new Path2D(gl[0]);x.lineWidth=3.4;x.strokeStyle=INK;x.stroke(s);x.fillStyle="#fff";x.fill(s);if(gl[1]){x.fillStyle=INK;x.fill(new Path2D(gl[1]))}}
   }else{
-    const bg="#2f2d29",fg="#eadcb8";
-    x.beginPath();x.arc(16,16,14,0,7);x.fillStyle=bg;x.fill();x.lineWidth=1.8;x.strokeStyle=fg;x.stroke();
+    x.beginPath();
+    if(B.shape==="square"){x.lineJoin="miter";x.rect(3,3,26,26)}else x.arc(16,16,14,0,7);
+    if(B.glow){x.shadowColor=B.glow;x.shadowBlur=6}
+    x.fillStyle=B.bg;x.fill();x.lineWidth=B.shape==="square"?2.6:1.8;x.strokeStyle=B.ring;x.stroke();
+    x.shadowBlur=0;
     x.save();x.translate(16,16.5);x.scale(.7,.7);x.translate(-16,-16);
-    if(txt){T();x.fillStyle=fg;x.fillText(gl,16,17)}
-    else{x.fillStyle=fg;x.fill(new Path2D(gl[0]));if(gl[1]){x.fillStyle=bg;x.fill(new Path2D(gl[1]))}}
+    if(txt){T();x.fillStyle=B.fg;x.fillText(gl,16,17)}
+    else{x.fillStyle=B.fg;x.fill(new Path2D(gl[0]));if(gl[1]){x.fillStyle=B.bg;x.fill(new Path2D(gl[1]))}}
     x.restore();
   }
   return c;

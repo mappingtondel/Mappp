@@ -1,6 +1,6 @@
 const CACHE_NAME = 'gamemap-v4';   // App-Oberfläche
 const TILE_CACHE = 'gamemap-tiles-v1'; // Kartenkacheln & Schriften (begrenzt)
-const MAX_TILE_ENTRIES = 1200;
+const MAX_TILE_ENTRIES = 5000;
 
 const ASSETS = [
   './',

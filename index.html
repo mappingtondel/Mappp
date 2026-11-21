@@ -14,14 +14,18 @@
 <link rel="stylesheet" href="css/style.css">
 </head><body>
 <div id="map"></div>
+<div id="busy"></div>
+<div id="loader"><div class="ldr-title">GAMEMAP</div><div class="ldr-bar"><i></i></div><div class="ldr-sub">Karte wird geladen …</div></div>
 <div id="netStatus">Offline-Modus – Keine Internetverbindung</div>
 <div id="side">
   <button class="fab panel" id="styleBtn" aria-label="Kartenstil"></button>
   <button class="fab panel" id="locBtn" aria-label="Mein Standort"></button>
   <button class="fab panel hidden" id="compassBtn" aria-label="Nordausrichtung"></button>
   <button class="fab panel" id="ovBtn" aria-label="Routenübersicht"></button>
-  <button class="fab panel" id="voiceBtn" aria-label="Sprachansagen"></button>
+  <button class="fab panel" id="voiceBtn" aria-label="Ansagen und Töne"></button>
+  <button class="fab panel" id="offBtn" aria-label="Kartengebiet offline speichern"></button>
 </div>
+<div id="limit" hidden><b id="limitVal"></b></div>
 <div id="banner">
   <div class="b1"><div class="tico" id="bIco"></div><div><div id="bDist"></div><div id="bText"></div></div></div>
   <div id="b2" hidden><div class="tico" id="b2Ico"></div><div id="b2Text"></div></div>
@@ -32,9 +36,10 @@
     <div><b id="eta">–</b><span>Ankunft</span></div>
     <div><b id="remT">–</b><span id="remTL">Min.</span></div>
     <div><b id="remD">–</b><span>km</span></div>
-    <div><b id="speedVal">0</b><span>km/h</span></div>
+    <div id="speedTile"><b id="speedVal">0</b><span>km/h</span></div>
   </div>
-  <button id="stopBtn">Beenden</button>
+  <div id="simTag" hidden>SIMULATION · Tempo ändern: auf km/h tippen</div>
+  <div class="nbtns"><button id="shareBtn">Teilen</button><button id="stopBtn">Beenden</button></div>
 </div>
 <div id="sheet" class="panel">
   <div id="card">
@@ -42,8 +47,11 @@
       <div><h3 id="cTitle"></h3><p id="cSub"></p></div>
       <button id="favToggle" aria-label="Favorit"></button>
     </div>
+    <div id="alts"></div>
     <div id="waypoints"></div>
     <div id="cBtns"></div>
+    <div id="opts"></div>
+    <div id="along"></div>
   </div>
   <div id="results"></div>
   <div id="chips"></div>

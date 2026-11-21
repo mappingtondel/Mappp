@@ -4,7 +4,7 @@ const sv=(d,fill)=>'<svg viewBox="0 0 24 24" width="18" height="18" fill="'+(fil
 export const IC={
  layers:sv('<path d="M12 4l9 5-9 5-9-5z"/><path d="M3 14l9 5 9-5"/>'),
  loc:sv('<path d="M20 4L4 11.2l6.6 2.2L12.8 20z"/>',"currentColor"),
- compass:sv('<circle cx="12" cy="12" r="9"/><polygon points="12,6 15,12 12,18 9,12" fill="currentColor"/>'),
+ compass:sv('<circle cx="12" cy="12" r="9"/><polygon points="12,5.5 15,12 9,12" fill="#ff453a" stroke="none"/><polygon points="12,18.5 15,12 9,12" fill="currentColor" stroke="none"/>'),
  voice:sv('<path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/>'),
  mute:sv('<path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="currentColor"/><path d="M4 4l16 16"/>'),
  route:sv('<circle cx="7" cy="5.5" r="2.3"/><path d="M7 8c0 5 10 2 10 7"/><circle cx="17" cy="18" r="2.6" fill="currentColor"/>'),
@@ -14,7 +14,12 @@ export const IC={
  close:sv('<path d="M6 6l12 12M18 6L6 18"/>'),
  star:sv('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>'),
  starFill:sv('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',"currentColor"),
- plus:sv('<path d="M12 5v14M5 12h14"/>')
+ plus:sv('<path d="M12 5v14M5 12h14"/>'),
+ home:sv('<path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/>'),
+ work:sv('<rect x="4" y="8" width="16" height="11" rx="2"/><path d="M9 8V6h6v2"/>'),
+ play:sv('<path d="M8 5v14l11-7z"/>',"currentColor"),
+ download:sv('<path d="M12 4v10M8 10l4 4 4-4M5 19h14"/>'),
+ share:sv('<path d="M12 15V4M8 8l4-4 4 4M6 12v7h12v-7"/>')
 };
 
 const TURN={9:35,10:90,11:135,14:-135,15:-90,16:-35,18:35,19:-35,20:35,21:-35,23:35,24:-35,37:35,38:-35};
@@ -94,6 +99,57 @@ export function addHistory(place){
   hist.unshift({name: place.name, lngLat: place.lngLat, sub: place.sub || "", place: !!place.place, area: place.area || "", addr: place.addr || ""});
   if(hist.length > 8) hist.length = 8;
   try{ localStorage.setItem(HIST_KEY, JSON.stringify(hist)); }catch{}
+}
+
+// Zuhause / Arbeit
+export function getSaved(key){
+  try{ return JSON.parse(localStorage.getItem("gamemap_"+key)) || null; }catch{ return null; }
+}
+export function setSaved(key, place){
+  try{
+    if(place) localStorage.setItem("gamemap_"+key, JSON.stringify({name: place.name, lngLat: place.lngLat, sub: place.sub || "", place: !!place.place, area: place.area || "", addr: place.addr || ""}));
+    else localStorage.removeItem("gamemap_"+key);
+  }catch{}
+}
+
+// Routenoptionen (Autobahn/Maut/Fähren meiden)
+export function getOpts(){
+  try{ return JSON.parse(localStorage.getItem("gamemap_opts")) || {}; }catch{ return {}; }
+}
+export function setOpts(o){
+  try{ localStorage.setItem("gamemap_opts", JSON.stringify(o)); }catch{}
+}
+
+// Kleine 8-Bit-Töne (ohne Audiodateien)
+let ac;
+export function unlockAudio(){
+  try{
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    if(ac.state === "suspended") ac.resume();
+  }catch{}
+}
+const SFX = {
+  route:  [[660,.08],[880,.14]],
+  reroute:[[440,.1],[330,.16]],
+  arrive: [[523,.1],[659,.1],[784,.1],[1047,.26]],
+  tick:   [[880,.05]],
+  error:  [[200,.2]]
+};
+export function sfx(name){
+  if(!ac || ac.state !== "running" || !SFX[name]) return;
+  try{
+    let t = ac.currentTime + .01;
+    SFX[name].forEach(([f, d]) => {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = "square"; o.frequency.value = f;
+      g.gain.setValueAtTime(.0001, t);
+      g.gain.exponentialRampToValueAtTime(.05, t + .01);
+      g.gain.exponentialRampToValueAtTime(.0001, t + d);
+      o.connect(g); g.connect(ac.destination);
+      o.start(t); o.stop(t + d + .02);
+      t += d;
+    });
+  }catch{}
 }
 
 // Netzwerk-Status überwachen

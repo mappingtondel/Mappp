@@ -30,7 +30,35 @@ export function project(p,a,b){
   return {d:Math.hypot(ax+t*dx,ay+t*dy),t};
 }
 
-export async function calculateRoute(startCoords, waypoints, destCoords){
+// Eine Valhalla-Route (trip) in unser Format umwandeln
+function parseTrip(trip){
+  // Alle Legs zusammenführen (bei Zwischenstopps)
+  let shape = [];
+  let man = [];
+  let offset = 0;
+  trip.legs.forEach((leg, legIdx) => {
+    const dec = decodePolyline(leg.shape);
+    if (legIdx > 0 && dec.length > 0) dec.shift(); // doppelten Punkt vermeiden
+    leg.maneuvers.forEach(m => {
+      man.push({
+        ...m,
+        begin_shape_index: m.begin_shape_index + offset,
+        end_shape_index: m.end_shape_index + offset
+      });
+    });
+    shape = shape.concat(dec);
+    offset = shape.length - 1;
+  });
+
+  const cum=[0];
+  for(let i=1;i<shape.length;i++) cum[i]=cum[i-1]+dist(shape[i-1],shape[i]);
+
+  return { shape, man, cum, tripTime: trip.summary.time, summary: trip.summary };
+}
+
+// Liefert eine Liste von Routen: [Hauptroute, Alternativen …]
+// opts: {highways, tolls, ferry} = true -> möglichst meiden; alternates nur ohne Zwischenstopps möglich
+export async function calculateRoute(startCoords, waypoints, destCoords, opts = {}){
   const pts = [startCoords, ...waypoints.map(w => w.lngLat), destCoords];
   const locations = pts.map((c, idx) => ({
     lat: c[1],
@@ -38,14 +66,21 @@ export async function calculateRoute(startCoords, waypoints, destCoords){
     type: (idx === 0 || idx === pts.length - 1) ? "break" : "through"
   }));
 
+  const auto = {};
+  if (opts.highways) auto.use_highways = 0;
+  if (opts.tolls) auto.use_tolls = 0;
+  if (opts.ferry) auto.use_ferry = 0;
+
   const body={
     locations,
     costing:"auto",
     directions_options:{language:"de-DE",units:"kilometers"}
   };
+  if (Object.keys(auto).length) body.costing_options = { auto };
+  if (opts.alternates && waypoints.length === 0) body.alternates = opts.alternates;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), 12000);
 
   try {
     const res = await fetch(VALHALLA+"?json="+encodeURIComponent(JSON.stringify(body)), {signal: controller.signal});
@@ -56,35 +91,9 @@ export async function calculateRoute(startCoords, waypoints, destCoords){
     }
     const j = await res.json();
     if(!j.trip||!j.trip.legs||!j.trip.legs.length) throw new Error("Keine Route gefunden");
-    
-    // Alle Legs zusammenführen (bei Zwischenstopps)
-    let shape = [];
-    let man = [];
-    let offset = 0;
-    j.trip.legs.forEach((leg, legIdx) => {
-      const dec = decodePolyline(leg.shape);
-      if (legIdx > 0 && dec.length > 0) dec.shift(); // doppelten Punkt vermeiden
-      leg.maneuvers.forEach(m => {
-        man.push({
-          ...m,
-          begin_shape_index: m.begin_shape_index + offset,
-          end_shape_index: m.end_shape_index + offset
-        });
-      });
-      shape = shape.concat(dec);
-      offset = shape.length - 1;
-    });
-
-    const cum=[0];
-    for(let i=1;i<shape.length;i++) cum[i]=cum[i-1]+dist(shape[i-1],shape[i]);
-
-    return {
-      shape,
-      man,
-      cum,
-      tripTime: j.trip.summary.time,
-      summary: j.trip.summary
-    };
+    const routes=[parseTrip(j.trip)];
+    (j.alternates||[]).forEach(a=>{ if(a&&a.trip&&a.trip.legs&&a.trip.legs.length) routes.push(parseTrip(a.trip)); });
+    return routes;
   } finally {
     clearTimeout(timeout);
   }
